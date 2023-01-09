@@ -2142,7 +2142,6 @@ static int oplus_chg_soc_notified_flag_is_set(int flag)
 static int oplus_chg_chg_batt_capacity_jump_check(struct oplus_chg_chip *chip)
 {
 	static bool ui_to_soc_jump_flag = false;
-
 	union power_supply_propval pval = {0, };
 	int status;
 
