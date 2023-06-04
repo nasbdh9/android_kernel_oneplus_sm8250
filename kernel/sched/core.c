@@ -38,9 +38,6 @@
 #include <linux/task_sched_info.h>
 #endif /* defined(OPLUS_FEATURE_TASK_CPUSTATS) && defined(CONFIG_OPLUS_SCHED) */
 
-#ifdef CONFIG_OPLUS_FEATURE_GAME_OPT
-#include "../../drivers/soc/oplus/game_opt/game_ctrl.h"
-#endif
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
 #include <linux/cpu_jankinfo/sa_jankinfo.h>
 #endif
@@ -2972,10 +2969,6 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags,
 
 	walt_try_to_wake_up(p);
 
-#ifdef CONFIG_OPLUS_FEATURE_GAME_OPT
-        g_rt_try_to_wake_up(p);
-#endif
-
 	cpu = select_task_rq(p, p->wake_cpu, SD_BALANCE_WAKE, wake_flags,
 			     sibling_count_hint);
 	if (task_cpu(p) != cpu) {
@@ -3687,9 +3680,6 @@ static struct rq *finish_task_switch(struct task_struct *prev)
 		 * task and put them back on the free list.
 		 */
 		kprobe_flush_task(prev);
-#ifdef CONFIG_OPLUS_FEATURE_GAME_OPT
-		g_rt_task_dead(prev);
-#endif
 
 		/* Task is done with its stack. */
 		put_task_stack(prev);
