@@ -333,12 +333,10 @@ static void queue_request(struct fuse_iqueue *fiq, struct fuse_req *req,
 	req->in.h.len = sizeof(struct fuse_in_header) +
 		len_args(req->in.numargs, (struct fuse_arg *) req->in.args);
 	list_add_tail(&req->list, &fiq->pending);
-
 	if (sync)
 		wake_up_sync(&fiq->waitq);
 	else
 		wake_up(&fiq->waitq);
-
 	kill_fasync(&fiq->fasync, SIGIO, POLL_IN);
 }
 
@@ -425,7 +423,7 @@ static void request_end(struct fuse_conn *fc, struct fuse_req *req)
 		flush_bg_queue(fc);
 		spin_unlock(&fc->lock);
 	}
-	wake_up_sync(&req->waitq);
+	wake_up(&req->waitq);
 	if (req->end)
 		req->end(fc, req);
 put_request:
@@ -845,10 +843,8 @@ static int fuse_check_page(struct page *page)
 	       1 << PG_uptodate |
 	       1 << PG_lru |
 	       1 << PG_active |
-	       1 << PG_workingset |
 	       1 << PG_reclaim |
-	       1 << PG_waiters |
-	       LRU_GEN_MASK | LRU_REFS_MASK))) {
+	       1 << PG_waiters))) {
 		printk(KERN_WARNING "fuse: trying to steal weird page\n");
 		printk(KERN_WARNING "  page=%p index=%li flags=%08lx, count=%i, mapcount=%i, mapping=%p\n", page, page->index, page->flags, page_count(page), page_mapcount(page), page->mapping);
 		return 1;
@@ -919,12 +915,6 @@ static int fuse_try_move_page(struct fuse_copy_state *cs, struct page **pagep)
 
 	if (!(buf->flags & PIPE_BUF_FLAG_LRU))
 		lru_cache_add_file(newpage);
-
-	/*
-	 * Release while we have extra ref on stolen page.  Otherwise
-	 * anon_pipe_buf_release() might think the page can be reused.
-	 */
-	pipe_buf_release(cs->pipe, buf);
 
 	err = 0;
 	spin_lock(&cs->req->waitq.lock);
@@ -1009,17 +999,7 @@ static int fuse_copy_page(struct fuse_copy_state *cs, struct page **pagep,
 
 	while (count) {
 		if (cs->write && cs->pipebufs && page) {
-			/*
-			 * Can't control lifetime of pipe buffers, so always
-			 * copy user pages.
-			 */
-			if (cs->req->user_pages) {
-				err = fuse_copy_fill(cs);
-				if (err)
-					return err;
-			} else {
-				return fuse_ref_page(cs, page, offset, count);
-			}
+			return fuse_ref_page(cs, page, offset, count);
 		} else if (!cs->len) {
 			if (cs->move_pages && page &&
 			    offset == 0 && count == PAGE_SIZE) {
@@ -1051,25 +1031,20 @@ static int fuse_copy_pages(struct fuse_copy_state *cs, unsigned nbytes,
 {
 	unsigned i;
 	struct fuse_req *req = cs->req;
-	int err;
 
-	if (req->ff)
-		spin_lock(&req->ff->fc->lock);
 	for (i = 0; i < req->num_pages && (nbytes || zeroing); i++) {
+		int err;
 		unsigned offset = req->page_descs[i].offset;
 		unsigned count = min(nbytes, req->page_descs[i].length);
 
 		err = fuse_copy_page(cs, &req->pages[i], offset, count,
 				     zeroing);
 		if (err)
-			goto err;
+			return err;
 
 		nbytes -= count;
 	}
-err:
-	if (req->ff)
-		spin_unlock(&req->ff->fc->lock);
-	return err;
+	return 0;
 }
 
 /* Copy a single argument in the request to/from userspace buffer */
@@ -1341,15 +1316,6 @@ static ssize_t fuse_dev_do_read(struct fuse_dev *fud, struct file *file,
 		goto restart;
 	}
 	spin_lock(&fpq->lock);
-	/*
-	 *  Must not put request on fpq->io queue after having been shut down by
-	 *  fuse_abort_conn()
-	 */
-	if (!fpq->connected) {
-		req->out.h.error = err = -ECONNABORTED;
-		goto out_end;
-
-	}
 	list_add(&req->list, &fpq->io);
 	spin_unlock(&fpq->lock);
 	cs->req = req;
@@ -1362,9 +1328,6 @@ static ssize_t fuse_dev_do_read(struct fuse_dev *fud, struct file *file,
 	clear_bit(FR_LOCKED, &req->flags);
 	if (!fpq->connected) {
 		err = (fc->aborted && fc->abort_err) ? -ECONNABORTED : -ENODEV;
-		/* Assign abnormal value to req->error when fpq disconnected */
-		if (req->in.h.opcode == FUSE_CANONICAL_PATH)
-			req->out.h.error = -ECONNABORTED;
 		goto out_end;
 	}
 	if (err) {
@@ -1909,7 +1872,6 @@ static ssize_t fuse_dev_do_write(struct fuse_dev *fud,
 	struct fuse_req *req;
 	struct fuse_out_header oh;
 
-
 	if (nbytes < sizeof(struct fuse_out_header))
 		return -EINVAL;
 
@@ -1931,7 +1893,7 @@ static ssize_t fuse_dev_do_write(struct fuse_dev *fud,
 	}
 
 	err = -EINVAL;
-	if (oh.error <= -512 || oh.error > 0)
+	if (oh.error <= -1000 || oh.error > 0)
 		goto err_finish;
 
 	spin_lock(&fpq->lock);
@@ -1985,12 +1947,8 @@ static ssize_t fuse_dev_do_write(struct fuse_dev *fud,
 
 	spin_lock(&fpq->lock);
 	clear_bit(FR_LOCKED, &req->flags);
-	if (!fpq->connected) {
-		/* Assign abnormal value to req->error when fpq disconnected */
-		if (req->in.h.opcode == FUSE_CANONICAL_PATH)
-			req->out.h.error = -ECONNABORTED;
+	if (!fpq->connected)
 		err = -ENOENT;
-	}
 	else if (err)
 		req->out.h.error = -EIO;
 	if (!test_bit(FR_PRIVATE, &req->flags))
@@ -2100,12 +2058,8 @@ static ssize_t fuse_dev_splice_write(struct pipe_inode_info *pipe,
 
 	pipe_lock(pipe);
 out_free:
-	for (idx = 0; idx < nbuf; idx++) {
-		struct pipe_buffer *buf = &bufs[idx];
-
-		if (buf->ops)
-			pipe_buf_release(pipe, buf);
-	}
+	for (idx = 0; idx < nbuf; idx++)
+		pipe_buf_release(pipe, &bufs[idx]);
 	pipe_unlock(pipe);
 
 	kvfree(bufs);
@@ -2306,50 +2260,37 @@ static int fuse_device_clone(struct fuse_conn *fc, struct file *new)
 static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 			   unsigned long arg)
 {
-	int res;
-	int oldfd;
-	struct fuse_dev *fud = NULL;
+	int err = -ENOTTY;
 
-	switch (cmd) {
-	case FUSE_DEV_IOC_CLONE:
-		res = -EFAULT;
-		if (!get_user(oldfd, (__u32 __user *)arg)) {
+	if (cmd == FUSE_DEV_IOC_CLONE) {
+		int oldfd;
+
+		err = -EFAULT;
+		if (!get_user(oldfd, (__u32 __user *) arg)) {
 			struct file *old = fget(oldfd);
 
-			res = -EINVAL;
+			err = -EINVAL;
 			if (old) {
+				struct fuse_dev *fud = NULL;
+
 				/*
 				 * Check against file->f_op because CUSE
 				 * uses the same ioctl handler.
 				 */
 				if (old->f_op == file->f_op &&
-				    old->f_cred->user_ns ==
-					    file->f_cred->user_ns)
+				    old->f_cred->user_ns == file->f_cred->user_ns)
 					fud = fuse_get_dev(old);
 
 				if (fud) {
 					mutex_lock(&fuse_mutex);
-					res = fuse_device_clone(fud->fc, file);
+					err = fuse_device_clone(fud->fc, file);
 					mutex_unlock(&fuse_mutex);
 				}
 				fput(old);
 			}
 		}
-		break;
-	case FUSE_DEV_IOC_PASSTHROUGH_OPEN:
-		res = -EFAULT;
-		if (!get_user(oldfd, (__u32 __user *)arg)) {
-			res = -EINVAL;
-			fud = fuse_get_dev(file);
-			if (fud)
-				res = fuse_passthrough_open(fud, oldfd);
-		}
-		break;
-	default:
-		res = -ENOTTY;
-		break;
 	}
-	return res;
+	return err;
 }
 
 const struct file_operations fuse_dev_operations = {
