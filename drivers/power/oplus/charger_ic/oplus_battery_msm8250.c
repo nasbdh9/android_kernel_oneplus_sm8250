@@ -10450,7 +10450,7 @@ int smbchg_get_chargerid_volt(void)
        
 	rc = iio_read_channel_processed(chg->iio.chgid_v_chan, &chargerid_volt);
 	if (rc < 0) {
-		chg_err("[OPLUS_CHG][%s]: iio_read_channel_processed  get error\n", __func__);
+		 // chg_err("[OPLUS_CHG][%s]: iio_read_channel_processed  get error\n", __func__);
 		return 0;
 	}
 
@@ -11268,7 +11268,7 @@ void oplus_get_usbtemp_volt(struct oplus_chg_chip *chip)
 
 	rc = iio_read_channel_processed(chg->iio.usbtemp_v_chan, &usbtemp_volt);
 	if (rc < 0) {
-		chg_err("[OPLUS_CHG][%s]: iio_read_channel_processed  get error\n", __func__);
+		 // chg_err("[OPLUS_CHG][%s]: iio_read_channel_processed  get error\n", __func__);
 		chip->usbtemp_volt_l = usbtemp_volt_l_pre;
 		goto usbtemp_next;
 	}
@@ -11292,7 +11292,7 @@ usbtemp_next:
 
 	rc = iio_read_channel_processed(chg->iio.usbtemp_sup_v_chan, &usbtemp_volt);
 	if (rc < 0) {
-		chg_err("[OPLUS_CHG][%s]: iio_read_channel_processed  get error\n", __func__);
+		 // chg_err("[OPLUS_CHG][%s]: iio_read_channel_processed  get error\n", __func__);
 		chip->usbtemp_volt_r = usbtemp_volt_r_pre;
 		return;
 	}
@@ -11318,7 +11318,7 @@ static int get_btb_temp(struct iio_channel *temp_chan)
 
 	rc = iio_read_channel_processed(temp_chan, &temp);
 	if (rc < 0) {
-		chg_err("[OPLUS_CHG][%s]: iio_read_channel_processed  get error\n", __func__);
+		 // chg_err("[OPLUS_CHG][%s]: iio_read_channel_processed  get error\n", __func__);
 		return temp;
 	}
 
